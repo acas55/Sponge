@@ -29,17 +29,27 @@ import com.google.common.base.Optional;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.network.play.server.S05PacketSpawnPosition;
 import net.minecraft.network.play.server.S07PacketRespawn;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook.EnumFlags;
 import net.minecraft.network.play.server.S1FPacketSetExperience;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.BlockPos;
 import net.minecraft.world.WorldServer;
+import net.minecraftforge.common.DimensionManager;
+import net.minecraftforge.common.network.ForgeMessage;
 import net.minecraftforge.common.util.Constants;
+import net.minecraftforge.fml.common.network.FMLEmbeddedChannel;
+import net.minecraftforge.fml.common.network.FMLOutboundHandler;
+import net.minecraftforge.fml.common.network.NetworkRegistry;
+import net.minecraftforge.fml.relauncher.Side;
 import org.spongepowered.api.entity.Entity;
 import org.spongepowered.api.entity.EntitySnapshot;
 import org.spongepowered.api.entity.EntityType;
 import org.spongepowered.api.util.RelativePositions;
 import org.spongepowered.api.util.annotation.NonnullByDefault;
+import org.spongepowered.api.world.Dimension;
+import org.spongepowered.api.world.DimensionTypes;
 import org.spongepowered.api.world.Location;
 import org.spongepowered.api.world.World;
 import org.spongepowered.api.world.extent.Extent;
@@ -52,6 +62,8 @@ import org.spongepowered.mod.SpongeMod;
 import org.spongepowered.mod.interfaces.IMixinEntity;
 import org.spongepowered.mod.registry.SpongeGameRegistry;
 import org.spongepowered.mod.util.SpongeHooks;
+import org.spongepowered.mod.util.VecHelper;
+import org.spongepowered.mod.world.SpongeDimensionType;
 
 import java.util.ArrayDeque;
 import java.util.EnumSet;
@@ -186,17 +198,26 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
         }
 
         net.minecraft.world.World nmsWorld = null;
-        if (location.getExtent() instanceof World && ((net.minecraft.world.World) location.getExtent() != this.worldObj)) {
-            if (!(thisEntity instanceof EntityPlayer)) {
-                nmsWorld = (net.minecraft.world.World) location.getExtent();
-                teleportEntity(thisEntity, location, thisEntity.dimension, nmsWorld.provider.getDimensionId());
+        if (location.getExtent() instanceof World && ((World) location.getExtent()).getUniqueId() != ((World) this.worldObj).getUniqueId()) {
+            nmsWorld = (net.minecraft.world.World) location.getExtent();
+            if (thisEntity instanceof EntityPlayerMP) {
+                // register dimension on client-side
+                if (SpongeMod.instance.getSpongeRegistry().isSpongeDimension(nmsWorld.provider.getDimensionId())) {
+                    FMLEmbeddedChannel serverChannel = NetworkRegistry.INSTANCE.getChannel("FORGE", Side.SERVER);
+                    serverChannel.attr(FMLOutboundHandler.FML_MESSAGETARGET).set(FMLOutboundHandler.OutboundTarget.PLAYER);
+                    serverChannel.attr(FMLOutboundHandler.FML_MESSAGETARGETARGS).set(thisEntity);
+                    serverChannel.writeOutbound(new ForgeMessage.DimensionRegisterMessage(nmsWorld.provider.getDimensionId(),
+                            ((SpongeDimensionType) ((Dimension) nmsWorld.provider).getType()).getDimensionTypeId()));
+                }
             }
+            teleportEntity(thisEntity, location, thisEntity.dimension, nmsWorld.provider.getDimensionId());
         } else {
-            setPosition(location.getPosition().getX(), location.getPosition().getY(), location.getPosition().getZ());
             if (thisEntity instanceof EntityPlayerMP) {
                 ((EntityPlayerMP) thisEntity).playerNetServerHandler
                         .setPlayerLocation(location.getPosition().getX(), location.getPosition().getY(), location.getPosition().getZ(),
                                 thisEntity.rotationYaw, thisEntity.rotationPitch);
+            } else {
+                setPosition(location.getPosition().getX(), location.getPosition().getY(), location.getPosition().getZ());
             }
         }
 
@@ -292,6 +313,28 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
                 return false;
             }
         }
+    }
+
+    @Override
+    public boolean transferToWorld(String worldName, Vector3d position) {
+        for (WorldServer worldserver : DimensionManager.getWorlds()) {
+            if (worldserver.getWorldInfo().getWorldName().equalsIgnoreCase(worldName)) {
+                Vector3d pos = VecHelper.toVector3d(worldserver.getSpawnPoint());
+                Location location = new Location((World) worldserver, pos);
+                setLocation(location);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public boolean transferToWorld(UUID uuid, Vector3d position) {
+        String worldFolder = SpongeMod.instance.getSpongeRegistry().getWorldFolder(uuid);
+        if (worldFolder != null) {
+            return transferToWorld(worldFolder, position);
+        }
+        return false;
     }
 
     @Override
@@ -442,7 +485,6 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
         entity.dimension = targetDim;
         entity.setWorld(toWorld);
         entity.isDead = false;
-        entity.setPosition(location.getPosition().getX(), location.getPosition().getY(), location.getPosition().getZ());
         toWorld.theChunkProviderServer.loadChunk((int) entity.posX >> 4, (int) entity.posZ >> 4);
         while (!toWorld.getCollidingBoundingBoxes(entity, entity.getEntityBoundingBox()).isEmpty() && entity.posY < 256.0D) {
             entity.setPosition(entity.posX, entity.posY + 1.0D, entity.posZ);
@@ -451,9 +493,25 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
         if (entity instanceof EntityPlayer) {
             EntityPlayerMP entityplayermp1 = (EntityPlayerMP) entity;
             entityplayermp1.isDead = false;
+            boolean fmlClient = entityplayermp1.playerNetServerHandler.getNetworkManager().channel().attr(NetworkRegistry.FML_MARKER).get();
+            // Support vanilla clients teleporting to custom dimensions
+            if (!fmlClient) {
+                if (((Dimension) toWorld.provider).getType().equals(DimensionTypes.NETHER)) {
+                    targetDim = -1;
+                } else if (((Dimension) toWorld.provider).getType().equals(DimensionTypes.END)) {
+                    targetDim = 1;
+                } else {
+                    targetDim = 0;
+                }
+            }
+
             entityplayermp1.playerNetServerHandler.sendPacket(
                     new S07PacketRespawn(targetDim, toWorld.getDifficulty(), toWorld.getWorldInfo().getTerrainType(),
                             entityplayermp1.theItemInWorldManager.getGameType()));
+            BlockPos pos = toWorld.getSpawnPoint();
+            entityplayermp1.playerNetServerHandler.setPlayerLocation(entityplayermp1.posX, entityplayermp1.posY, entityplayermp1.posZ,
+                    entityplayermp1.rotationYaw, entityplayermp1.rotationPitch);
+            entityplayermp1.playerNetServerHandler.sendPacket(new S05PacketSpawnPosition(pos));
             entityplayermp1.playerNetServerHandler.sendPacket(
                     new S1FPacketSetExperience(entityplayermp1.experience, entityplayermp1.experienceTotal, entityplayermp1.experienceLevel));
             entityplayermp1.setSneaking(false);
@@ -465,6 +523,7 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
             entityplayermp1.addSelfToInternalCraftingInventory();
             entityplayermp1.setHealth(entityplayermp1.getHealth());
         } else {
+            entity.setPosition(location.getPosition().getX(), location.getPosition().getY(), location.getPosition().getZ());
             toWorld.spawnEntityInWorld(entity);
         }
 
@@ -526,10 +585,8 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
     /**
      * Hooks into vanilla's writeToNBT to call {@link #writeToNbt}.
      *
-     * <p>
-     * This makes it easier for other entity mixins to override writeToNBT
-     * without having to specify the <code>@Inject</code> annotation.
-     * </p>
+     * <p> This makes it easier for other entity mixins to override writeToNBT
+     * without having to specify the <code>@Inject</code> annotation. </p>
      *
      * @param compound The compound vanilla writes to (unused because we write
      *        to SpongeData)
@@ -543,10 +600,8 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
     /**
      * Hooks into vanilla's readFromNBT to call {@link #readFromNbt}.
      *
-     * <p>
-     * This makes it easier for other entity mixins to override readFromNbt
-     * without having to specify the <code>@Inject</code> annotation.
-     * </p>
+     * <p> This makes it easier for other entity mixins to override readFromNbt
+     * without having to specify the <code>@Inject</code> annotation. </p>
      *
      * @param compound The compound vanilla reads from (unused because we read
      *        from SpongeData)
@@ -561,9 +616,7 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
      * Gets the SpongeData NBT tag, used for additional data not stored in the
      * vanilla tag.
      *
-     * <p>
-     * Modifying this tag will affect the data stored.
-     * </p>
+     * <p> Modifying this tag will affect the data stored. </p>
      *
      * @return The data tag
      */

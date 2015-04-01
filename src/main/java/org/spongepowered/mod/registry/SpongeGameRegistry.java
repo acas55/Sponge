@@ -55,6 +55,8 @@ import net.minecraft.world.WorldProvider;
 import net.minecraft.world.WorldProviderEnd;
 import net.minecraft.world.WorldProviderHell;
 import net.minecraft.world.WorldProviderSurface;
+import net.minecraft.world.WorldSettings.GameType;
+import net.minecraft.world.WorldType;
 import net.minecraft.world.biome.BiomeGenBase;
 import net.minecraftforge.fml.common.registry.GameData;
 import org.spongepowered.api.Game;
@@ -153,6 +155,7 @@ import org.spongepowered.api.scoreboard.displayslot.DisplaySlot;
 import org.spongepowered.api.scoreboard.objective.ObjectiveBuilder;
 import org.spongepowered.api.scoreboard.objective.displaymode.ObjectiveDisplayMode;
 import org.spongepowered.api.service.persistence.SerializationService;
+import org.spongepowered.api.service.persistence.data.DataContainer;
 import org.spongepowered.api.stats.BlockStatistic;
 import org.spongepowered.api.stats.EntityStatistic;
 import org.spongepowered.api.stats.ItemStatistic;
@@ -186,11 +189,17 @@ import org.spongepowered.api.util.rotation.Rotations;
 import org.spongepowered.api.world.Dimension;
 import org.spongepowered.api.world.DimensionType;
 import org.spongepowered.api.world.DimensionTypes;
+import org.spongepowered.api.world.GeneratorType;
+import org.spongepowered.api.world.GeneratorTypes;
+import org.spongepowered.api.world.WorldBuilder;
+import org.spongepowered.api.world.WorldCreationSettings;
 import org.spongepowered.api.world.biome.BiomeType;
 import org.spongepowered.api.world.biome.BiomeTypes;
 import org.spongepowered.api.world.difficulty.Difficulties;
 import org.spongepowered.api.world.difficulty.Difficulty;
 import org.spongepowered.api.world.gamerule.DefaultGameRules;
+import org.spongepowered.api.world.gen.WorldGenerator;
+import org.spongepowered.api.world.storage.WorldProperties;
 import org.spongepowered.api.world.weather.Weather;
 import org.spongepowered.api.world.weather.Weathers;
 import org.spongepowered.mod.SpongeMod;
@@ -207,6 +216,7 @@ import org.spongepowered.mod.entity.SpongeEntityMeta;
 import org.spongepowered.mod.entity.SpongeEntityType;
 import org.spongepowered.mod.entity.SpongeProfession;
 import org.spongepowered.mod.entity.player.gamemode.SpongeGameMode;
+import org.spongepowered.mod.interfaces.IMixinWorldType;
 import org.spongepowered.mod.item.SpongeCoalType;
 import org.spongepowered.mod.item.SpongeFireworkBuilder;
 import org.spongepowered.mod.item.SpongeItemStackBuilder;
@@ -246,6 +256,7 @@ import org.spongepowered.mod.text.format.SpongeTextStyle;
 import org.spongepowered.mod.text.translation.SpongeTranslation;
 import org.spongepowered.mod.weather.SpongeWeather;
 import org.spongepowered.mod.world.SpongeDimensionType;
+import org.spongepowered.mod.world.SpongeWorldBuilder;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -258,11 +269,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 
 @SuppressWarnings("unchecked")
 @NonnullByDefault
@@ -461,11 +474,12 @@ public class SpongeGameRegistry implements GameRegistry {
             .put(Direction.UP, EnumFacing.UP)
             .put(Direction.DOWN, EnumFacing.DOWN)
             .build();
-    private static final ImmutableMap<String, GameMode> gameModeMappings = new ImmutableMap.Builder<String, GameMode>()
-            .put("SURVIVAL", new SpongeGameMode())
-            .put("CREATIVE", new SpongeGameMode())
-            .put("ADVENTURE", new SpongeGameMode())
-            .put("SPECTATOR", new SpongeGameMode())
+    public static final ImmutableMap<String, GameMode> gameModeMappings = new ImmutableMap.Builder<String, GameMode>()
+            .put("SURVIVAL", new SpongeGameMode("SURVIVAL"))
+            .put("CREATIVE", new SpongeGameMode("CREATIVE"))
+            .put("ADVENTURE", new SpongeGameMode("ADVENTURE"))
+            .put("SPECTATOR", new SpongeGameMode("SPECTATOR"))
+            .put("NOT_SET", new SpongeGameMode("NOT_SET"))
             .build();
     private static final ImmutableMap<String, Difficulty> difficultyMappings = new ImmutableMap.Builder<String, Difficulty>()
             .put("PEACEFUL", (Difficulty) (Object) EnumDifficulty.PEACEFUL)
@@ -504,6 +518,13 @@ public class SpongeGameRegistry implements GameRegistry {
     private final Map<String, Fish> fishMappings = Maps.newHashMap();
     private final Map<String, CookedFish> cookedFishMappings = Maps.newHashMap();
     private final Map<String, GoldenApple> goldenAppleMappings = Maps.newHashMap();
+    public final Map<String, Callable<WorldGenerator>> generatorMappings = Maps.newHashMap();
+    private final Hashtable<Class<? extends WorldProvider>, Integer> classToProviders = new Hashtable<Class<? extends WorldProvider>, Integer>();
+    private final ArrayList<Integer> spongeDims = new ArrayList<Integer>(); // used to keep track of Sponge dimensions
+    private final Map<UUID, WorldProperties> worldPropertiesMappings = Maps.newHashMap();
+    private final Map<Integer, String> worldFolderDimensionIdMappings = Maps.newHashMap();
+    public final Map<UUID, String> worldFolderUniqueIdMappings = Maps.newHashMap();
+    private final Map<String, GeneratorType> generatorTypeMappings = Maps.newHashMap();
 
     @Override
     public Optional<BlockType> getBlock(String id) {
@@ -769,6 +790,111 @@ public class SpongeGameRegistry implements GameRegistry {
         return ImmutableList.copyOf(this.dimensionTypeMappings.values());
     }
 
+    public void registerDimensionType(DimensionType type) {
+        this.dimensionTypeMappings.put(type.getName(), type);
+        this.dimensionClassMappings.put(type.getDimensionClass(), type);
+    }
+
+    public void registerWorldProperties(WorldProperties properties) {
+        this.worldPropertiesMappings.put(properties.getUniqueId(), properties);
+    }
+
+    public void registerWorldDimensionId(int dim, String folderName) {
+        this.worldFolderDimensionIdMappings.put(dim, folderName);
+    }
+
+    public void registerWorldUniqueId(UUID uuid, String folderName) {
+        this.worldFolderUniqueIdMappings.put(uuid, folderName);
+    }
+
+    public String getWorldFolder(int dim) {
+        return this.worldFolderDimensionIdMappings.get(dim);
+    }
+
+    public String getWorldFolder(UUID uuid) {
+        return this.worldFolderUniqueIdMappings.get(uuid);
+    }
+
+    public int getProviderType(Class<? extends WorldProvider> provider) {
+        return this.classToProviders.get(provider);
+    }
+
+    public void addSpongeDimension(int dim) {
+        if (!this.spongeDims.contains(dim)) {
+            this.spongeDims.add(dim);
+        }
+    }
+
+    public void removeSpongeDimension(int dim) {
+        if (this.spongeDims.contains(dim)) {
+            this.spongeDims.remove(this.spongeDims.indexOf(dim));
+        }
+    }
+
+    public boolean isSpongeDimension(int dim) {
+        return this.spongeDims.contains(dim);
+    }
+
+    public GameType getGameType(GameMode mode) {
+        return GameType.getByName(mode.getTranslation().get());
+    }
+
+    public Optional<WorldProperties> getWorldProperties(UUID uuid) {
+        return Optional.fromNullable(this.worldPropertiesMappings.get(uuid));
+    }
+
+    @Override
+    public Optional<GeneratorType> getGeneratorType(String name) {
+        throw new UnsupportedOperationException(); // TODO
+    }
+
+    @Override
+    public Collection<GeneratorType> getGeneratorTypes() {
+        throw new UnsupportedOperationException(); // TODO
+    }
+
+    @Override
+    public WorldBuilder getWorldBuilder() {
+        return new SpongeWorldBuilder();
+    }
+
+    @Override
+    public WorldBuilder getWorldBuilder(WorldProperties properties) {
+        return new SpongeWorldBuilder(properties);
+    }
+
+    @Override
+    public WorldBuilder getWorldBuilder(WorldCreationSettings settings) {
+        return new SpongeWorldBuilder(settings);
+    }
+
+    public void setGeneratorTypes() {
+        this.generatorTypeMappings.put("DEFAULT", (GeneratorType) WorldType.DEFAULT);
+        this.generatorTypeMappings.put("FLAT", (GeneratorType) WorldType.FLAT);
+        this.generatorTypeMappings.put("LARGE_BIOMES", (GeneratorType) WorldType.LARGE_BIOMES);
+        this.generatorTypeMappings.put("AMPLIFIED", (GeneratorType) WorldType.AMPLIFIED);
+        this.generatorTypeMappings.put("DEBUG", (GeneratorType) WorldType.DEBUG_WORLD);
+        this.generatorTypeMappings.put("SUPER_FLAT", (GeneratorType) WorldType.DEFAULT_1_1);
+        RegistryHelper.mapFields(GeneratorTypes.class, this.generatorTypeMappings);
+    }
+
+    @Override
+    public GeneratorType registerGeneratorType(String name, Callable<WorldGenerator> generator) {
+        WorldType type = new WorldType(name);
+        ((IMixinWorldType) type).setWorldGenerator(generator);
+        this.generatorMappings.put(name, generator);
+        return (GeneratorType) type;
+    }
+
+    @Override
+    public GeneratorType registerGeneratorType(String name, Callable<WorldGenerator> generator, DataContainer settings) {
+        WorldType type = new WorldType(name);
+        ((IMixinWorldType) type).setWorldGenerator(generator);
+        ((IMixinWorldType) type).setGeneratorSettings(settings);
+        this.generatorMappings.put(name, generator);
+        return (GeneratorType) type;
+    }
+
     @Override
     public Optional<Rotation> getRotationFromDegree(int degrees) {
         for (Rotation rotation : rotationMappings.values()) {
@@ -1027,11 +1153,6 @@ public class SpongeGameRegistry implements GameRegistry {
     @Override
     public AttributeCalculator getAttributeCalculator() {
         throw new UnsupportedOperationException();
-    }
-
-    public void registerEnvironment(DimensionType env) {
-        this.dimensionTypeMappings.put(env.getName(), env);
-        this.dimensionClassMappings.put(env.getDimensionClass(), env);
     }
 
     private void setParticles() {
@@ -1514,16 +1635,20 @@ public class SpongeGameRegistry implements GameRegistry {
     }
 
     private void setSelectors() {
-        /*try {
-            SelectorTypes.class.getDeclaredField("ALL_PLAYERS").set(null, new SpongeSelectorType("a"));
-            SelectorTypes.class.getDeclaredField("ALL_ENTITIES").set(null, new SpongeSelectorType("e"));
-            SelectorTypes.class.getDeclaredField("NEAREST_PLAYER").set(null, new SpongeSelectorType("p"));
-            SelectorTypes.class.getDeclaredField("RANDOM_PLAYER").set(null, new SpongeSelectorType("r"));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        RegistryHelper.setFactory(SelectorTypes.class, new SpongeSelectorTypeFactory());
-        RegistryHelper.setFactory(Selectors.class, new SpongeSelectorFactory());*/
+        /*
+         * try { SelectorTypes.class.getDeclaredField("ALL_PLAYERS").set(null,
+         * new SpongeSelectorType("a"));
+         * SelectorTypes.class.getDeclaredField("ALL_ENTITIES").set(null, new
+         * SpongeSelectorType("e"));
+         * SelectorTypes.class.getDeclaredField("NEAREST_PLAYER").set(null, new
+         * SpongeSelectorType("p"));
+         * SelectorTypes.class.getDeclaredField("RANDOM_PLAYER").set(null, new
+         * SpongeSelectorType("r")); } catch (Exception e) {
+         * e.printStackTrace(); } RegistryHelper.setFactory(SelectorTypes.class,
+         * new SpongeSelectorTypeFactory());
+         * RegistryHelper.setFactory(Selectors.class, new
+         * SpongeSelectorFactory());
+         */
     }
 
     private void setTitleFactory() {
@@ -1532,9 +1657,9 @@ public class SpongeGameRegistry implements GameRegistry {
 
     private void setDimensionTypes() {
         try {
-            DimensionTypes.class.getDeclaredField("NETHER").set(null, new SpongeDimensionType("NETHER", true, WorldProviderHell.class));
-            DimensionTypes.class.getDeclaredField("OVERWORLD").set(null, new SpongeDimensionType("OVERWORLD", true, WorldProviderSurface.class));
-            DimensionTypes.class.getDeclaredField("END").set(null, new SpongeDimensionType("END", false, WorldProviderEnd.class));
+            DimensionTypes.class.getDeclaredField("NETHER").set(null, new SpongeDimensionType("NETHER", true, WorldProviderHell.class, -1));
+            DimensionTypes.class.getDeclaredField("OVERWORLD").set(null, new SpongeDimensionType("OVERWORLD", true, WorldProviderSurface.class, 0));
+            DimensionTypes.class.getDeclaredField("END").set(null, new SpongeDimensionType("END", false, WorldProviderEnd.class, 1));
         } catch (Throwable e) {
             e.printStackTrace();
         }
@@ -2066,6 +2191,7 @@ public class SpongeGameRegistry implements GameRegistry {
         setSounds();
         setDifficulties();
         setEntityInteractionTypes();
+        setGeneratorTypes();
     }
 
     public void postInit() {
