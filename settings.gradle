@@ -1,3 +1,2 @@
-rootProject.name = 'Sponge'
+rootProject.name = name
 include 'SpongeAPI'
-
