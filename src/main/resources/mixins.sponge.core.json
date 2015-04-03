@@ -1,0 +1,28 @@
+{
+    "required": true,
+    "minVersion": "0.2",
+    "package": "org.spongepowered.common.mixin.core",
+    "refmap": "mixins.sponge.refmap.json",
+    "server": [
+        "MixinGameProfile",
+
+        "network.MixinNetHandlerHandshakeTCP",
+        "network.MixinNetworkManager",
+
+        "status.MixinMinecraftProtocolVersionIdentifier",
+        "status.MixinNetHandlerStatusServer",
+        "status.MixinPingResponseHandler",
+        "status.MixinPlayerCountData",
+        "status.MixinServerStatusResponse",
+
+        "text.MixinChatComponentScore",
+        "text.MixinChatComponentSelector",
+        "text.MixinChatComponentStyle",
+        "text.MixinChatComponentText",
+        "text.MixinChatComponentTranslation",
+        "text.MixinChatStyle",
+        "text.MixinChatStyleRoot",
+        "text.MixinClickEvent",
+        "text.MixinHoverEvent"
+    ]
+}
