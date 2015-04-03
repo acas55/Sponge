@@ -28,7 +28,6 @@ import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import net.minecraft.util.EnumChatFormatting;
-import org.apache.commons.lang3.NotImplementedException;
 import org.spongepowered.api.GameProfile;
 import org.spongepowered.api.GameRegistry;
 import org.spongepowered.api.status.Favicon;
@@ -60,6 +59,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
+import javax.inject.Singleton;
+
+@Singleton
 public abstract class SpongeGameRegistry implements GameRegistry {
 
     public static final Map<String, TextColor> textColorMappings = Maps.newHashMap();

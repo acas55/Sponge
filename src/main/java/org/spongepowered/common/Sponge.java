@@ -33,7 +33,9 @@ import org.spongepowered.api.Game;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 
+@Singleton
 public class Sponge {
 
     @Nullable
@@ -50,12 +52,12 @@ public class Sponge {
 
     @Inject
     public Sponge(Injector injector, Game game, Logger logger) {
+        checkState(instance == null, "Sponge was already initialized");
+        instance = this;
+
         this.injector = checkNotNull(injector, "injector");
         this.game = checkNotNull(game, "game");
         this.logger = checkNotNull(logger, "logger");
-
-        checkState(instance == null, "Sponge was already initialized");
-        instance = this;
     }
 
     public static Injector getInjector() {
