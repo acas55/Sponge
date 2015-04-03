@@ -49,15 +49,17 @@ public class Sponge {
     private final Injector injector;
     private final Game game;
     private final Logger logger;
+    private final SpongeImpl impl;
 
     @Inject
-    public Sponge(Injector injector, Game game, Logger logger) {
+    public Sponge(Injector injector, Game game, Logger logger, SpongeImpl impl) {
         checkState(instance == null, "Sponge was already initialized");
         instance = this;
 
         this.injector = checkNotNull(injector, "injector");
         this.game = checkNotNull(game, "game");
         this.logger = checkNotNull(logger, "logger");
+        this.impl = checkNotNull(impl, "impl");
     }
 
     public static Injector getInjector() {
@@ -70,6 +72,10 @@ public class Sponge {
 
     public static Logger getLogger() {
         return getInstance().logger;
+    }
+
+    public static SpongeImpl impl() {
+        return getInstance().impl;
     }
 
 }
