@@ -22,21 +22,4 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package org.spongepowered.common.network;
-
-import org.spongepowered.api.MinecraftVersion;
-
-import java.net.InetSocketAddress;
-
-public interface IMixinNetworkManager {
-
-    InetSocketAddress getAddress();
-
-    InetSocketAddress getVirtualHost();
-
-    void setVirtualHost(String host, int port);
-
-    MinecraftVersion getVersion();
-
-    void setVersion(int version);
-}
+@org.spongepowered.api.util.annotation.NonnullByDefault package org.spongepowered.common.plugin;

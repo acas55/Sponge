@@ -25,48 +25,67 @@
 package org.spongepowered.common.registry;
 
 import com.google.common.base.Function;
+import com.google.common.collect.ImmutableSet;
+import org.spongepowered.common.Sponge;
 
 import java.lang.reflect.Field;
-import java.util.Collection;
-import java.util.Collections;
+import java.lang.reflect.Modifier;
 import java.util.Map;
+import java.util.Set;
 
-public class RegistryHelper {
+public final class RegistryHelper {
 
-    public static boolean mapFields(Class<?> apiClass, Map<String, ?> mapping, Collection<String> ignoredFields) {
+    private RegistryHelper() {
+    }
+
+    private static boolean isCatalogField(Field field) {
+        int modifiers = field.getModifiers();
+        return Modifier.isStatic(modifiers) && Modifier.isPublic(modifiers);
+    }
+
+    public static boolean mapFields(Class<?> apiClass, Map<String, ?> mapping, String... ignored) {
         boolean mappingSuccess = true;
-        for (Field f : apiClass.getDeclaredFields()) {
-            if (ignoredFields.contains(f.getName())) {
+        Set<String> ignoredFields = ImmutableSet.copyOf(ignored);
+
+        for (Field field : apiClass.getDeclaredFields()) {
+            String name = field.getName();
+            if (ignoredFields.contains(name) || !mapping.containsKey(name) || !isCatalogField(field)) {
                 continue;
             }
+
+            Object value = mapping.get(name);
             try {
-                if (!mapping.containsKey(f.getName())) {
-                    continue;
-                }
-                f.set(null, mapping.get(f.getName()));
+                field.set(null, value);
             } catch (Exception e) {
-                e.printStackTrace();
+                Sponge.getLogger().error("Failed to set {} = {}", field, value, e);
                 mappingSuccess = false;
             }
+
         }
+
         return mappingSuccess;
     }
 
     public static boolean mapFields(Class<?> apiClass, Function<String, ?> mapFunction) {
         boolean mappingSuccess = true;
-        for (Field f : apiClass.getDeclaredFields()) {
-            try {
-                f.set(null, mapFunction.apply(f.getName()));
-            } catch (Exception e) {
-                e.printStackTrace();
-                mappingSuccess = false;
+
+        for (Field field : apiClass.getDeclaredFields()) {
+            if (!isCatalogField(field)) {
+                continue;
+            }
+
+            Object value = mapFunction.apply(field.getName());
+            if (value != null) {
+                try {
+                    field.set(null, value);
+                } catch (Exception e) {
+                    Sponge.getLogger().error("Failed to set {} = {}", field, value, e);
+                    mappingSuccess = false;
+                }
             }
         }
-        return mappingSuccess;
-    }
 
-    public static boolean mapFields(Class<?> apiClass, Map<String, ?> mapping) {
-        return mapFields(apiClass, mapping, Collections.<String>emptyList());
+        return mappingSuccess;
     }
 
     public static boolean setFactory(Class<?> apiClass, Object factory) {
@@ -74,8 +93,9 @@ public class RegistryHelper {
             apiClass.getDeclaredField("factory").set(null, factory);
             return true;
         } catch (Exception e) {
-            e.printStackTrace();
+            Sponge.getLogger().error("Failed to set factory of {} to {}", apiClass, factory, e);
             return false;
         }
     }
+
 }

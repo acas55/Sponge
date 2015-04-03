@@ -22,29 +22,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package org.spongepowered.common.mixin.core.network;
+package org.spongepowered.common.network;
 
-import net.minecraft.network.NetworkManager;
-import net.minecraft.network.handshake.client.C00Handshake;
-import net.minecraft.server.network.NetHandlerHandshakeTCP;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.common.network.SpongeNetworkManager;
+import org.spongepowered.api.MinecraftVersion;
 
-@Mixin(NetHandlerHandshakeTCP.class)
-public abstract class MixinNetHandlerHandshakeTCP {
+import java.net.InetSocketAddress;
 
-    @Shadow
-    private NetworkManager networkManager;
+public interface SpongeNetworkManager {
 
-    @Inject(method = "processHandshake", at = @At("HEAD"))
-    public void onProcessHandshake(C00Handshake packetIn, CallbackInfo ci) {
-        SpongeNetworkManager info = (SpongeNetworkManager) this.networkManager;
-        info.setVersion(packetIn.getProtocolVersion());
-        info.setVirtualHost(packetIn.ip, packetIn.port);
-    }
+    InetSocketAddress getAddress();
 
+    InetSocketAddress getVirtualHost();
+
+    void setVirtualHost(String host, int port);
+
+    MinecraftVersion getVersion();
+
+    void setVersion(int version);
 }
